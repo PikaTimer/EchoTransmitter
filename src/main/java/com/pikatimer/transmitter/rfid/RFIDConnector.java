@@ -381,9 +381,11 @@ public class RFIDConnector {
             // Run it
             try {
                 if (c.cmd.startsWith("START")) {
+                    logger.info("Executing START command for " + mac);
                     readerOuputStream.writeBytes("R");
                     readerOuputStream.flush();
                 } else if (c.cmd.startsWith("STOP")){
+                    logger.info("Executing STOP command for" + mac );
                     readerOuputStream.writeBytes("S");
                     readerOuputStream.flush();
                     readerOuputStream.writeBytes("N");
@@ -401,7 +403,7 @@ public class RFIDConnector {
                     if (cmd.length > 1) startTimestamp = Long.parseLong(cmd[1]);
                     if (cmd.length > 2) endTimestamp = Long.parseLong(cmd[2]);
 
-                    logger.debug("Issuring Rewind for " + mac + " From: " + startTimestamp + " To: " + endTimestamp);
+                    logger.info("Issuring Rewind for " + mac + " From: " + startTimestamp + " To: " + endTimestamp);
                     readerOuputStream.flush();
 
                     // Send 8[0x00][0x00], like RFIDServer, not "800" per the manual
