@@ -126,7 +126,7 @@ public class ReaderScanner {
                                                  
                         } catch (IOException ex) {
                           //Logger.getLogger(this.class.getName()).log(Level.SEVERE, null, ex);
-                          System.out.println("oops...");
+                          logger.debug("Scanner Thread Exception: " + ex.getMessage());
                         }
                     }
                 }

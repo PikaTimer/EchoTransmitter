@@ -90,7 +90,12 @@ public class RFIDConnector {
                         OutputStream rawOutput = ultraSocket.getOutputStream();
                     ) {
                         connectToUltra = true; // we got here so we have a good connection
-                        ultraSocket.setSoTimeout(15000); // 15 seconds. In theory we get a voltage every 2
+                        
+                        // Set the timeout to 20 seconds
+                        // In theory, we see a voltate every 2
+                        // However the system pauses for 10+ when reading is enabled
+                        ultraSocket.setSoTimeout(20000); 
+                        
                         readerOuputStream = new DataOutputStream(new BufferedOutputStream(rawOutput));
 
                         int read = -255; 
@@ -101,6 +106,17 @@ public class RFIDConnector {
                             //logger.trace("Read: " + Character.toString ((char) read) + "  " + Integer.toHexString(0x100 | read).substring(1));
                         } 
                         logger.trace("Read connect string for " + mac + ": " + line);
+                        
+                        // Enable the extended status messages
+                        // 03 00 00 03 0d 0a
+                        String command = Character.toString ((char) 3) ;
+                        command += Character.toString ((char) 0) ;
+                        command += Character.toString ((char) 0) ;
+                        command += Character.toString ((char) 3) ;
+                        command += Character.toString ((char) 13) ;
+                        command += Character.toString ((char) 10) ;
+                        readerOuputStream.writeBytes(command); 
+                        readerOuputStream.flush();
 
                         while(connectToUltra) {
                             read = -255; 
@@ -115,6 +131,23 @@ public class RFIDConnector {
                                     } if (read != 10) {
                                         line = line +  Character.toString ((char) read);
                                         //logger.trace("Read: " + Character.toString ((char) read) + "  " + Integer.toHexString(0x100 | read).substring(1));
+                                        
+                                        // Look for the extended status messages
+                                        // The 2nd char has the length. So we can use that to consume
+                                        // the entire output since they may contain the 0x10 end of line in them
+                                        // Warning, the data is in host order (little endian) 
+                                        // and not network byte order (big endian). 
+                                        if (line.equals(Character.toString ((char) 3))) {
+                                            // Lenght includes the 0x03 and lenght chars, so N-2 are left to read
+                                            int length = input.read() - 2; 
+                                            logger.trace("EX Length: " + Integer.toHexString(0x100 | length).substring(1));
+                                            while (length-- > 0){
+                                                read = input.read();
+                                                logger.trace("EX: " + Integer.toHexString(0x100 | read).substring(1));
+                                                line = line + Character.toString ((char) read);
+                                            }
+                                            processLine(line);
+                                        }
                                     } else {
                                         processLine(line);
                                     }
@@ -162,6 +195,7 @@ public class RFIDConnector {
         else if (line.startsWith("S")) type="status";
         else if (line.startsWith("U")) type="command";
         else if (line.startsWith("u")) type="command"; // general command
+        else if (line.startsWith(Character.toString ((char) 3))) type ="extStatus";
         else if (line.substring(0,8).matches("^\\d+:\\d+:\\d+.*")) type = "time"; //time ends with a special char
 
         switch(type){
@@ -172,12 +206,11 @@ public class RFIDConnector {
                 logger.trace(mac + " Read Status: " + line);
                 commandResultQueue.offer(line);
                 break;
-            
             case "voltage": // voltage
                 //logger.trace(mac + " Voltage: " + line);
-                voltageStatus = line.split("=")[1];
+                //voltageStatus = line.split("=")[1];
                 logger.trace(mac + " Voltage: " + voltageStatus);
-                getReadStatus();
+                //getReadStatus();
                 break;
             case "time": // command response
                 logger.trace(mac + " Time: " + line.substring(0,19));
@@ -187,18 +220,22 @@ public class RFIDConnector {
                 logger.trace(mac + " Command response recieved");
                 commandResultQueue.offer(line);
                 break;
+            case "extStatus":
+                logger.trace(mac + " Extended status received" + stringToHex(line));
+                processExtStatus(line.toCharArray());
+                break;
             default: // unknown command response
-                logger.trace(mac + " Unknown: \"" + line.substring(0, 1) + "\" " + line);
+                logger.trace(mac + " Unknown: " + stringToHex(line));
         }
 
     }
     
     
     private void processRead(String r){
-        System.out.println("Chip Read: " + r);
+        logger.debug("Chip Read: " + r);
         String[] tokens = r.split(",", -1);
         // 0,11055,1170518701,698,1,-71,0,2,1,0000000000000000,0,29319
-        // 0 -- junk
+        // 0 -- Signals a read
         // 1 -- chip
         // 2 -- time
         // 3 -- milis
@@ -212,7 +249,7 @@ public class RFIDConnector {
         // 11 -- LogID
         
         if (tokens.length < 12 ) {
-            System.out.println("  Chip read is missing data: " + r);
+            logger.warn("  Chip read is missing data: " + r);
             return;
         }
         
@@ -227,7 +264,6 @@ public class RFIDConnector {
         //Auto-Rewind on missing data
         if (rewind.equals("0")) {
             
-            
             int currentRead=Integer.parseInt(logNo);
             if (lastReadLogNo == -1 || lastReadLogNo + 1 == currentRead ) {
                 //logger.trace("No missing reads: Last " + lastRead + " Current: " + logNo);
@@ -240,14 +276,14 @@ public class RFIDConnector {
             }
         }
         
-        System.out.println("  Chip: " + chip + " logNo: " + logNo);
+        logger.trace("  Chip: " + chip + " logNo: " + logNo);
         
         // make sure we have what we need...
         if (port.equals("0") && ! chip.equals("0")) { // invalid combo
-            System.out.println("Non Start time: " + chip);
+            logger.debug("Non Start time: " + r);
             return;
         } else if (!port.matches("[1234]") && !chip.equals("0")){
-            System.out.println("Invalid Port: " + port);
+            logger.debug("Invalid Port: " + r);
             return;
         }
         
@@ -256,7 +292,6 @@ public class RFIDConnector {
         Long seconds = Long.parseLong(tokens[2]);
         Long millis = Long.parseLong(tokens[3]);
         LocalDateTime read_ldt = EPOC.plusSeconds(seconds).plusNanos(millis * 1000000);
-        
         
         TimingData rawTime = new TimingData();
         rawTime.chip = chip;
@@ -267,7 +302,6 @@ public class RFIDConnector {
         rawTime.timestamp =  read_ldt.toString(); // fix this to always be YYYY-MM-DD HH:MM:ss.SSS
 
         uploader.postData(rawTime); // process it
-        
     }
 
     private void rewind(Integer lastRead, Integer currentRead) {
@@ -298,7 +332,7 @@ public class RFIDConnector {
 
                         } else {
                             // timeout
-                            System.out.println("Timeout with AutoRewind command");
+                            logger.info("Timeout with AutoRewind command");
                         }
                     } catch (IOException | InterruptedException ex) {
                         logger.error("AutoRewind Failure: " + ex.getMessage());
@@ -313,61 +347,6 @@ public class RFIDConnector {
     
     }
 
-    private void getReadStatus() {
-        
-        logger.trace("getStatus Called: mac -> " + mac + " battery -> \"" + voltageStatus + "\"");
-        // Send the read command
-        Thread getReadStatusThread = new Thread("Read Status request for " + mac) {
-            @Override public void run() {
-                if (readerOuputStream != null) {
-                    Boolean aquired = false;
-                    try {
-                        if (okToSend.tryAcquire(10, TimeUnit.SECONDS)){
-                            aquired=true;
-                            logger.trace("getReadStatus(): Sending ? command");
-                            readerOuputStream.writeBytes("?");
-                            readerOuputStream.flush();
-                            
-                            Status s = new Status();
-                            s.mac = mac;
-                            s.battery = Integer.parseInt(voltageStatus);
-                            s.reading = false;
-
-                            try {
-                                String result = commandResultQueue.poll(10, TimeUnit.SECONDS);
-                                if (result != null) {
-                                    logger.trace("Reading Status : " + result);
-                                    if (result.substring(2, 3).startsWith("1")) s.reading = true;
-                                    Optional<List<Command>> commands = uploader.postStatus(s);
-
-                                    // If there are any commands, then execute them.... 
-                                    if(commands.isPresent()){
-                                        processCommands(commands.get());
-                                    }
-                                } else {
-                                // timeout
-                                    logger.error("Timeout waiting for status for " + mac);
-                                }
-                            } catch (InterruptedException ex) {
-                                logger.error("InterruptedException " + mac + " " + ex.getLocalizedMessage());
-                            }
-                        } else {
-                            // timeout
-                            System.out.println("Timeout with read status request.");
-                        }
-                    } catch (IOException | InterruptedException ex) {
-                        logger.error("ReadStatus Failure: " + ex.getMessage());
-
-                    } finally {
-                        if (aquired) okToSend.release();
-                    }
-                }
-            }
-        };
-        getReadStatusThread.start();
-        
-    }
-    
     private void processCommands(List<Command> commands){
         // Possible commands are
         //      rewind <from>
@@ -377,53 +356,90 @@ public class RFIDConnector {
         commands.forEach(c -> {
             if (previousCommands.contains(c.id)) return;
             previousCommands.add(c.id);
-            
+            // Ack it
+            uploader.ackCommand(mac, c.id);
             // Run it
-            try {
-                if (c.cmd.startsWith("START")) {
-                    logger.info("Executing START command for " + mac);
-                    readerOuputStream.writeBytes("R");
-                    readerOuputStream.flush();
-                } else if (c.cmd.startsWith("STOP")){
-                    logger.info("Executing STOP command for" + mac );
-                    readerOuputStream.writeBytes("S");
-                    readerOuputStream.flush();
-                    readerOuputStream.writeBytes("N");
-                    readerOuputStream.flush();
-                } else if (c.cmd.startsWith("REWIND")){
-                    
-                    // Split the command 
-                    String[] cmd = c.cmd.split(" ");
+            Boolean aquired = false;
+            
+            try { 
+                aquired = okToSend.tryAcquire(10, TimeUnit.SECONDS);
+                
+                if (aquired){
+                    if (c.cmd.startsWith("START")) {
+                        logger.info("Executing START command for " + mac);
+                        readerOuputStream.writeBytes("R");
+                        readerOuputStream.flush();
+                    } else if (c.cmd.startsWith("STOP")){
+                        logger.info("Executing STOP command for" + mac );
+                        readerOuputStream.writeBytes("S");
+                        readerOuputStream.flush();
+                        readerOuputStream.writeBytes("N");
+                        readerOuputStream.flush();
+                    } else if (c.cmd.startsWith("REWIND")){
 
-                    // Default to today 
-                    Long startTimestamp = Duration.between(EPOC, LocalDateTime.of(LocalDate.now(), LocalTime.MIN)).getSeconds();
-                    Long endTimestamp = Duration.between(EPOC, LocalDateTime.of(LocalDate.now(), LocalTime.MAX)).getSeconds();
-                    
-                    // Parse the command to snag the start / end timestamps and replace what is above. 
-                    if (cmd.length > 1) startTimestamp = Long.parseLong(cmd[1]);
-                    if (cmd.length > 2) endTimestamp = Long.parseLong(cmd[2]);
+                        // Split the command 
+                        String[] cmd = c.cmd.split(" ");
 
-                    logger.info("Issuring Rewind for " + mac + " From: " + startTimestamp + " To: " + endTimestamp);
-                    readerOuputStream.flush();
+                        // Default to today 
+                        Long startTimestamp = Duration.between(EPOC, LocalDateTime.of(LocalDate.now(), LocalTime.MIN)).getSeconds();
+                        Long endTimestamp = Duration.between(EPOC, LocalDateTime.of(LocalDate.now(), LocalTime.MAX)).getSeconds();
 
-                    // Send 8[0x00][0x00], like RFIDServer, not "800" per the manual
-                    String command = "8";
-                    command += Character.toString ((char) 0) ;
-                    command += Character.toString ((char) 0) ;
-                    command += startTimestamp.toString() ;
-                    command += Character.toString ((char) 13) ;
-                    command += endTimestamp.toString();
-                    command += Character.toString ((char) 13) ;
+                        // Parse the command to snag the start / end timestamps and replace what is above. 
+                        if (cmd.length > 1) startTimestamp = Long.parseLong(cmd[1]);
+                        if (cmd.length > 2) endTimestamp = Long.parseLong(cmd[2]);
 
-                    readerOuputStream.writeBytes(command);
-                    readerOuputStream.flush();
+                        logger.info("Issuring Rewind for " + mac + " From: " + startTimestamp + " To: " + endTimestamp);
+                        readerOuputStream.flush();
+
+                        // Send 8[0x00][0x00], like RFIDServer, not "800" per the manual
+                        String command = "8";
+                        command += Character.toString ((char) 0) ;
+                        command += Character.toString ((char) 0) ;
+                        command += startTimestamp.toString() ;
+                        command += Character.toString ((char) 13) ;
+                        command += endTimestamp.toString();
+                        command += Character.toString ((char) 13) ;
+
+                        readerOuputStream.writeBytes(command);
+                        readerOuputStream.flush();
+                    }
                 }
-                // Ack it
-                uploader.ackCommand(mac, c.id);
-            } catch (IOException ex){
+            } catch (Exception ex){
                 logger.error("Command Exception " + mac + " " + ex.getLocalizedMessage());
+            } finally {
+                if (aquired) okToSend.release();
             }
         });
+    }
+
+    static String stringToHex(String string) {
+        StringBuilder buf = new StringBuilder(200);
+        for (char ch: string.toCharArray()) {
+          if (buf.length() > 0)
+            buf.append(' ');
+          buf.append(String.format("%02x", (int) ch));
+        }
+        return buf.toString();
+    }
+
+    private void processExtStatus(char[] status) {
+        
+        // We are after status[42] for the battery
+        // and status[45] for the state of the reader. 
+        if (status.length > 60) {            
+            Status s = new Status();
+            s.mac = mac;
+            s.battery = (int) status[42]; // old tricks are still good
+            s.reading = (char) 00 != status[45];
+
+            Optional<List<Command>> commands = uploader.postStatus(s);
+
+            // If there are any commands, then execute them.... 
+            if(commands.isPresent()){
+                processCommands(commands.get());
+            }
+
+        }
     }
     
 }
