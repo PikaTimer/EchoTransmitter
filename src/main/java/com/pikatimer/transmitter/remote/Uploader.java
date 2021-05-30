@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 john
+ * Copyright (C) 2021 John Garner
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -117,6 +117,7 @@ public class Uploader {
                             
                             logger.trace("Data Response Code: " + Integer.toString(response.statusCode()));
                             logger.trace("Data Response Body: " + response.body());  
+                            logger.info(response.body());
                         } catch (IOException | InterruptedException ex) {
                             logger.error(ex.getMessage());
                         }

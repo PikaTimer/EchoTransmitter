@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 john
+ * Copyright (C) 2021 John Garner
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -40,13 +40,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 
-
-// TODO:
-// Auto-Rewind
-// Reading Status query
-// Command injector
-// Post status after read status query returns
-// Fix date formatter (always include sec and mili)
 
 
 /**
@@ -299,9 +292,10 @@ public class RFIDConnector {
         rawTime.mac = mac;
         rawTime.port = port;
         rawTime.reader = reader;
-        rawTime.timestamp =  read_ldt.toString(); // fix this to always be YYYY-MM-DD HH:MM:ss.SSS
+        rawTime.timestamp = read_ldt.format(DateTimeFormatter.ofPattern("yyy-MM-dd HH:mm:ss.SSS"));
 
         uploader.postData(rawTime); // process it
+        logger.debug("Uploading Read:  MAC: " + mac + " chip: " + chip + " Time: " + rawTime.timestamp);
     }
 
     private void rewind(Integer lastRead, Integer currentRead) {
