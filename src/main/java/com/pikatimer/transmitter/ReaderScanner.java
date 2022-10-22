@@ -26,6 +26,7 @@ import java.net.NetworkInterface;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.logging.Level;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -125,8 +126,14 @@ public class ReaderScanner {
                             }
                                                  
                         } catch (IOException ex) {
-                          //Logger.getLogger(this.class.getName()).log(Level.SEVERE, null, ex);
-                          logger.debug("Scanner Thread Exception: " + ex.getMessage());
+                            //Logger.getLogger(this.class.getName()).log(Level.SEVERE, null, ex);
+                            logger.debug("Scanner Thread Exception: " + ex.getMessage());
+                          
+                            // Take a nap before we try again
+                            try {
+                                Thread.sleep(1000);
+                            } catch (Exception ex1) {
+                            }
                         }
                     }
                 }
